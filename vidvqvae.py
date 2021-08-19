@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 # Implementation based on https://github.com/rosinality/vq-vae-2-pytorch
 
-class Quantize(nn.Module):
+class Quantizer(nn.Module):
     def __init__(self, dim, n_embed, decay=0.99, eps=1e-5):
         super().__init__()
 
@@ -53,9 +53,56 @@ class Quantize(nn.Module):
     def embed_code(self, embed_id):
         return F.embedding(embed_id, self.embed.transpose(0, 1))
 
+class ResBlock(nn.Module):
+    def __init__(self, in_channel, channel):
+        super().__init__()
+
+        self.conv = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv3d(in_channel, channel, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(channel, in_channel, 1),
+        )
+
+    def forward(self, input):
+        out = self.conv(input)
+        out += input
+
+        return out
+
+class Encoder(nn.Module):
+    def __init__(self, in_channel, channel, n_res_block, n_res_channel, stride):
+        super().__init__()
+
+        blocks = []
+
+        if stride == 4:
+            blocks.append(nn.Conv3d(in_channel, channel, kernel_size=(4,8,8), stride=(2,4,4), padding=(1,2,2)))
+
+        elif stride == 2:
+            blocks.append(nn.Conv3d(channel, channel, kernel_size=(4,4,4), stride=(2,2,2), padding=(1,1,1)))
+
+        for i in range(n_res_block):
+            blocks.append(ResBlock(channel, n_res_channel))
+
+        blocks.append(nn.ReLU(inplace=True))
+
+        self.blocks = nn.Sequential(*blocks)
+
+    def forward(self, input):
+        return self.blocks(input)
+
+class Decoder(nn.Module):
+    def __init__(
+        self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride
+    ):
+        super().__init__()
+
+        blocks = 
+
 if __name__ == "__main__":
-    test = Quantize(64, 512)
-    rand = torch.rand((1, 2, 4, 64, 64)) # (B, C, D, H, W) 
-    print("Quantizing...")
-    res = test(rand)[0]
-    print(res.shape)
+    rand_input = torch.rand((8, 3, 16, 256, 256))
+    bot_test = Encoder(3, 4, 8, 8, stride=4)
+    top_test = Encoder(4, 4, 8, 8, stride=2)
+    print(bot_test(rand_input).shape)
+    print(top_test(bot_test(rand_input)).shape)
