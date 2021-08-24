@@ -74,13 +74,15 @@ class Encoder(nn.Module):
     def __init__(self, in_channel, channel, n_res_block, n_res_channel, stride):
         super().__init__()
 
-        blocks = []
-
         if stride == 4:
-            blocks.append(nn.Conv3d(in_channel, channel, kernel_size=(4,8,8), stride=(2,4,4), padding=(1,2,2)))
+            blocks = [
+                nn.Conv3d(in_channel, channel, kernel_size=(4, 8, 8), stride=(2,4,4), padding=(1,2,2))
+            ]
 
         elif stride == 2:
-            blocks.append(nn.Conv3d(channel, channel, kernel_size=(4,4,4), stride=(2,2,2), padding=(1,1,1)))
+            blocks = [
+                nn.Conv3d(in_channel, channel, kernel_size=(4, 4, 4), stride=(2, 2, 2), padding=(1,1,1))
+            ]
 
         for i in range(n_res_block):
             blocks.append(ResBlock(channel, n_res_channel))
@@ -94,15 +96,34 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride
+        self, in_channel, out_channel, channel, n_res_block, n_res_channel
     ):
         super().__init__()
 
-        blocks = 
+        blocks = [nn.Conv3d(in_channel, channel, 3, padding=1)]
+        
+        for i in range(n_res_block):
+            blocks.append(ResBlock(channel, n_res_channel))
+        
+        blocks.append(nn.ReLU(inplace=True))
+        
+        blocks.extend(
+            [
+                nn.ConvTranspose3d(channel, out_channel, kernel_size=(4,8,8), stride=(2,4,4), padding=(1,2,2))
+            ]
+        ) 
+                
+        self.blocks = nn.Sequential(*blocks)
+        
+    def forward(self, input):
+        return self.blocks(input)
 
 if __name__ == "__main__":
     rand_input = torch.rand((8, 3, 16, 256, 256))
     bot_test = Encoder(3, 4, 8, 8, stride=4)
     top_test = Encoder(4, 4, 8, 8, stride=2)
-    print(bot_test(rand_input).shape)
-    print(top_test(bot_test(rand_input)).shape)
+
+    bot_out = bot_test(rand_input)
+    decoder = Decoder(4, 3, 128, 5, 10)
+    print(bot_out.shape)
+    print(decoder(bot_out).shape)
