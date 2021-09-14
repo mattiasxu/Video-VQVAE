@@ -11,7 +11,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+generative/
 downloads/
+tensor_data/
 eggs/
 .eggs/
 lib/

@@ -1,0 +1,1 @@
+Mean: tensor([0., 0., 0.]) | std: tensor([0., 0., 0.])
