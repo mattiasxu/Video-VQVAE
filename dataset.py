@@ -5,29 +5,18 @@ import PIL
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
-PATH = "./generative"
+PATH = "./tensor_data"
 
 class DrivingDataset(Dataset):
-    def __init__(self, path, frames=16):
+    def __init__(self, path):
         self.path = path
-        self.frames = frames
-        self.imgs = os.listdir(path)
-        self.transform = None
+        self.data = os.listdir(path)
     
     def __len__(self):
-        return len(self.imgs)//8 - 1
+        return len(self.data)
     
     def __getitem__(self, idx):
-        video = torch.zeros(3, 16, 256, 256)
-        time = 0
-        for i in range(idx*8, idx*8+16):
-            img = PIL.Image.open(
-                self.path + f"/{i}" + ".png"
-            )
-            img = self.transform(img)
-            video[:, time, :, :] = img 
-            time += 1
-        return video
+        return torch.load(self.path + f"{idx}.pt")
 
 class Img2VidTensor():
     def __init__(self, path, save_dir, frames, skip):
@@ -85,14 +74,17 @@ class RunningStats():
         return torch.sqrt(self.variance())
 
 if __name__ == "__main__":
+    """
     stats = RunningStats()
-    
     for file in tqdm(os.listdir("./tensor_data/")):
         x = torch.load("./tensor_data/" + file)
         for time in range(0, 16):
             for pixels in x[:, time, :, :].reshape(256*256, 3):
                 stats.push(pixels)
         print(stats.std())
-    f = open("stats.txt", "a")
-    f.write(f"Mean: {stats.mean()} | std: {stats.std()}")
-    f.close()
+    """
+    
+    test = DrivingDataset("./tensor_data")
+    print(len(test))
+    train_set, val_set = torch.utils.data.random_split(test, [20000, 6016])
+    print(len(train_set))

@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import pytorch_lightning as pl
 
 # Implementation based on https://github.com/rosinality/vq-vae-2-pytorch
 
@@ -118,7 +119,7 @@ class Decoder(nn.Module):
     def forward(self, input):
         return self.blocks(input)
 
-class VQVAE(nn.Module):
+class VQVAE(pl.LightningModule):
     def __init__(
         self,
         in_channel=3,
@@ -151,13 +152,31 @@ class VQVAE(nn.Module):
             n_res_channel
             # stride=4,
         )
+        
+        self.criterion = nn.MSELoss()
+        self.latent_loss_weight
 
     def forward(self, input):
         quant_t, quant_b, diff, _, _ = self.encode(input)
         dec = self.decode(quant_t, quant_b)
 
         return dec, diff
+    
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return optimizer
 
+    def training_step(self, train_batch, batch_idx):
+        x, y = train_batch
+        x_hat, latent_loss = self.forward(x)
+        recon_loss = self.criterion(x_hat, y)
+        latent_loss = latent_loss.mean()
+        loss = recon_loss + latent_loss * self.latent_loss_weight
+        return loss
+    
+    def validation_step(self, val_batch, batch_idx):
+        pass
+    
     def encode(self, input):
         enc_b = self.enc_b(input)
         enc_t = self.enc_t(enc_b)
