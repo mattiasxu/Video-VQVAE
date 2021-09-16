@@ -16,7 +16,8 @@ class DrivingDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
-        return torch.load(self.path + f"{idx}.pt")
+        x = torch.load(self.path + f"/{idx}.pt")
+        return x
 
 class Img2VidTensor():
     def __init__(self, path, save_dir, frames, skip):

@@ -154,7 +154,7 @@ class VQVAE(pl.LightningModule):
         )
         
         self.criterion = nn.MSELoss()
-        self.latent_loss_weight
+        self.latent_loss_weight = 0.25
 
     def forward(self, input):
         quant_t, quant_b, diff, _, _ = self.encode(input)
@@ -167,15 +167,21 @@ class VQVAE(pl.LightningModule):
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
-        x, y = train_batch
+        x = y = train_batch
         x_hat, latent_loss = self.forward(x)
         recon_loss = self.criterion(x_hat, y)
         latent_loss = latent_loss.mean()
         loss = recon_loss + latent_loss * self.latent_loss_weight
+        self.log('train_loss', loss)
         return loss
     
     def validation_step(self, val_batch, batch_idx):
-        pass
+        x = y = val_batch
+        x_hat, latent_loss = self.forward(x)
+        recon_loss = self.criterion(x_hat, y)
+        latent_loss = latent_loss.mean()
+        loss = recon_loss + latent_loss * self.latent_loss_weight
+        self.log('val_loss', loss)
     
     def encode(self, input):
         enc_b = self.enc_b(input)
@@ -189,7 +195,6 @@ class VQVAE(pl.LightningModule):
         # dec_t = self.dec_t(quant_t)
         # enc_b = torch.cat([dec_t, enc_b], 1)
 
-        print(enc_b.shape)
         quant_b = self.quantize_conv_b(enc_b).permute(0, 2, 3, 4, 1)
         quant_b, diff_b, id_b = self.quantize_b(quant_b)
         quant_b = quant_b.permute(0, 4, 1, 2, 3)
