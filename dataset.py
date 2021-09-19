@@ -4,46 +4,34 @@ import os
 import PIL
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
+import numpy as np
 
 PATH = "./tensor_data"
 
 class DrivingDataset(Dataset):
-    def __init__(self, path):
+    def __init__(self, path, frames=16, skip=8):
         self.path = path
         self.data = os.listdir(path)
-    
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        x = torch.load(self.path + f"/{idx}.pt")
-        return x
-
-class Img2VidTensor():
-    def __init__(self, path, save_dir, frames, skip):
-        self.path = path
-        self.save_dir = save_dir
         self.frames = frames
         self.skip = skip
         self.transforms = transforms.Compose([
             transforms.ToTensor()
         ])
-        
+    
     def to_tensor(self, idx):
         img = PIL.Image.open(
-            self.path + f"/{idx}" + ".png"
+            self.path + f"/{idx}.png"
         ).convert('RGB')
         return self.transforms(img)
     
-    def videofy(self, idx):
-        vid = torch.zeros(3, self.frames, 256, 256)
-        time = 0
+    def __len__(self):
+        return 1 + (len(self.data) - self.frames)//self.skip
+    
+    def __getitem__(self, idx):
+        frames = []
         for i in range(idx*self.skip, idx*self.skip + self.frames):
-            img = self.to_tensor(i)
-            vid[:, time, :, :] = img
-            time += 1
-        torch.save(vid, f"{self.save_dir}/{idx}.pt")
-        return vid
+            frames.append(self.to_tensor(i))
+        return torch.stack(frames, 1)
     
 class RunningStats():
     def __init__(self):
@@ -85,7 +73,7 @@ if __name__ == "__main__":
         print(stats.std())
     """
     
-    test = DrivingDataset("./tensor_data")
+    test = DrivingDataset("./generative", frames=16, skip=8)
     print(len(test))
-    train_set, val_set = torch.utils.data.random_split(test, [20000, 6016])
+    train_set, val_set = torch.utils.data.random_split(test, [20000, 6017])
     print(len(train_set))
