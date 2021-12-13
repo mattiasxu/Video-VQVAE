@@ -96,11 +96,17 @@ class ResidualBlock(nn.Module):
     leave edge out of output, as they don't mean anything
     valuable. This also keeps input dim same as output dim.
     """
-    def __init__(self, n_channels):
+    def __init__(self, n_channels, attention=True):
         super().__init__()
-        self.input_conv = nn.Conv3d(in_channels=n_channels, out_channels=n_channels, kernel_size=2, padding=1)
-        self.output_conv = nn.Conv3d(in_channels=n_channels, out_channels=2*n_channels, kernel_size=2, padding=1)
+        if attention:
+            self.input_conv = nn.Conv3d(in_channels=n_channels, out_channels=n_channels, kernel_size=2, padding=1)
+            self.output_conv = nn.Conv3d(in_channels=n_channels, out_channels=2*n_channels, kernel_size=2, padding=1)
+        else:
+            self.input_conv = CausalConv3d(mask_center=False, in_channels=n_channels, out_channels=n_channels, kernel_size=(3, 7, 7), padding=(1, 3, 3))
+            self.output_conv = CausalConv3d(mask_center=False, in_channels=n_channels, out_channels=2*n_channels, kernel_size=(3, 7, 7), padding=(1, 3, 3))
+            
         self.activation = GatedActivation(activation_fn=nn.Identity())
+
         
     def forward(self, x):
         _, _, t, h, w = x.shape
@@ -131,14 +137,14 @@ class AttentionBlock(nn.Module):
 
     def forward(self, x):
         b, c, t, h, w = x.shape
-        pos_enc = positional_encoding(x.shape)
-        x = torch.cat((x, pos_enc), dim=1).to(x.device)
+        pos_enc = positional_encoding(x.shape).to(x.device)
+        x = torch.cat((x, pos_enc), dim=1)
         q = self.flatten(self.query(x))
         k = self.flatten(self.key(x))
         v = self.flatten(self.value(x))
         
         attention = torch.bmm(q, k.transpose(-2, -1)) / math.sqrt(c)
-        mask = causal_mask(t*h*w, mask_center=True)
+        mask = causal_mask(t*h*w, mask_center=True).to(x.device)
         attention = attention.masked_fill(mask == 0, -np.inf)
         attention = F.softmax(attention, dim=-1).masked_fill(mask == 0, 0)
         out = torch.bmm(attention, v)
@@ -149,37 +155,42 @@ class PixelSNAILBlock(nn.Module):
 
     Alongside the input, the block also receives the original input
     """
-    def __init__(self, in_channels=256, input_channels=3, n_res_blocks=4, key_channels=16, value_channels=128):
+    def __init__(self, in_channels=256, input_channels=3, n_res_blocks=4, key_channels=16, value_channels=128, attention=True):
         super().__init__()
-        self.res_blocks = nn.Sequential(*[ResidualBlock(in_channels) for _ in range(n_res_blocks)])
-        self.attention_block = AttentionBlock(in_channels=in_channels + input_channels, key_channels=key_channels, value_channels=value_channels)
+        self.attention = attention
+        self.res_blocks = nn.Sequential(*[ResidualBlock(n_channels=in_channels, attention=attention) for _ in range(n_res_blocks)])
+
+        if attention:
+            self.attention_block = AttentionBlock(in_channels=in_channels + input_channels, key_channels=key_channels, value_channels=value_channels)
+            self.attention_conv = nn.Conv3d(in_channels=value_channels, out_channels=in_channels, kernel_size=1)
 
         self.res_conv = nn.Conv3d(in_channels=in_channels, out_channels=in_channels, kernel_size=1)
-        self.attention_conv = nn.Conv3d(in_channels=value_channels, out_channels=in_channels, kernel_size=1)
         self.out_conv = nn.Conv3d(in_channels=in_channels, out_channels=in_channels, kernel_size=1)
         
     def forward(self, x, original_input):
         res_out = self.res_blocks(x)
-        attention_out = self.attention_block(torch.cat((res_out, original_input), dim=1))
+        if self.attention:
+            attention_out = self.attention_block(torch.cat((res_out, original_input), dim=1))
+            attention_out = elu_conv_elu(self.attention_conv, attention_out)
         
         res_out = elu_conv_elu(self.res_conv, res_out)
-        attention_out = elu_conv_elu(self.attention_conv, attention_out)
-        out = res_out + attention_out
+        out = res_out + (self.attention and attention_out)
         return elu_conv_elu(self.out_conv, out)
         
 class PixelSNAIL(nn.Module):
     """The PixelSNAIL [1] model"""
     
-    def __init__(self, n_codes, n_filters, n_res_blocks, key_channels, value_channels, n_blocks):
+    def __init__(self, attention, input_channels, n_codes, n_filters, n_res_blocks, n_snail_blocks, key_channels=None, value_channels=None):
         super().__init__()
-        self.in_conv = CausalConv3d(mask_center=True, in_channels=n_codes, 
+        self.in_conv = CausalConv3d(mask_center=True, in_channels=input_channels, 
                                     out_channels=n_filters, kernel_size=2, padding=1)
         self.pixel_snail_blocks = nn.ModuleList([
             PixelSNAILBlock(in_channels=n_filters,
-                            input_channels=n_codes,
+                            input_channels=input_channels,
                             n_res_blocks=n_res_blocks,
                             key_channels=key_channels,
-                            value_channels=value_channels) for _ in range(n_blocks)])
+                            value_channels=value_channels,
+                            attention=attention) for _ in range(n_snail_blocks)])
         self.out = nn.Conv3d(in_channels=n_filters, out_channels=n_codes, kernel_size=1)
 
     def forward(self, x):
@@ -190,8 +201,51 @@ class PixelSNAIL(nn.Module):
             x = x + block(x, original_input)
         return F.log_softmax(self.out(x), dim=1)
 
+class HierarchicalPixelSNAIL(nn.Module):
+    def __init__(self, n_codes, n_filters, n_res_blocks, n_snail_blocks, n_condition_blocks, key_channels, value_channels):
+        super().__init__()
+        self.top = PixelSNAIL(attention=True, input_channels=n_codes, n_codes=n_codes, 
+                              n_filters=n_filters, n_res_blocks=n_res_blocks, 
+                              n_snail_blocks=n_snail_blocks, key_channels=key_channels,
+                              value_channels=value_channels)
+        
+        self.bottom = PixelSNAIL(attention=False, input_channels=n_codes*2, n_codes=n_codes,
+                                 n_filters=n_filters, n_res_blocks=n_res_blocks, 
+                                 n_snail_blocks=n_snail_blocks)
+
+        self.condition_stack = []
+        
+        for _ in range(n_condition_blocks):
+            self.condition_stack.extend([
+                nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1),
+                nn.ELU(),
+                nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1)
+            ])
+
+        self.condition_stack = nn.ModuleList([nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1)
+                                             for _ in range(n_condition_blocks)])
+    
+    def forward(self, top, bot):
+        print("hello")
+        top = self.top(top)
+        condition = F.interpolate(top, scale_factor=2)
+        for module in self.condition_stack:
+            condition = condition + module(condition)
+        print(condition.shape, bot.shape)
+        bot = self.bottom(torch.cat((bot, condition), dim=1))
+        return top, bot
+        
+        
+
 if __name__ == "__main__":
-    test = PixelSNAIL(2, 64, 4, 16, 32, 5)
-    inp = torch.ones((1,2,4,4,4))
-    inp[:, :, 3, 3, 2] = 100000000
-    print(test(inp))
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(device)
+    # test = PixelSNAIL(True, 512*2, 512, 64, 4, 16, 32, 5)
+    # inp = torch.ones((1,512*2,4,32,32))
+    # inp[:, :, 2, 3, 2] = 100000000
+    # print(test(inp).shape)
+
+    top = torch.ones((1, 512, 4, 32, 32)).to(device)
+    bot = torch.ones((1, 512, 8, 64, 64)).to(device)
+    final = HierarchicalPixelSNAIL(n_codes=512, n_filters=256, n_res_blocks=2, n_snail_blocks=2, n_condition_blocks=2, key_channels=16, value_channels=128).to(device)
+    final(top, bot)
