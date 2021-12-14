@@ -8,6 +8,9 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+utils/
+VidVQVAE/
+examples/
 build/
 develop-eggs/
 dist/
@@ -131,3 +134,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+generative.zip

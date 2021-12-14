@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 import pytorch_lightning as pl
 
+
 # Implementation based on https://github.com/rosinality/vq-vae-2-pytorch
 
 class Quantizer(nn.Module):
@@ -22,9 +23,9 @@ class Quantizer(nn.Module):
     def forward(self, input):
         flatten = input.reshape(-1, self.dim)
         dist = (
-            flatten.pow(2).sum(1, keepdim=True)
-            - 2 * flatten @ self.embed
-            + self.embed.pow(2).sum(0, keepdim=True)
+                flatten.pow(2).sum(1, keepdim=True)
+                - 2 * flatten @ self.embed
+                + self.embed.pow(2).sum(0, keepdim=True)
         )
         _, embed_ind = (-dist).max(1)
         embed_onehot = F.one_hot(embed_ind, self.n_embed).type(flatten.dtype)
@@ -41,7 +42,7 @@ class Quantizer(nn.Module):
             self.embed_avg.data.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
             n = self.cluster_size.sum()
             cluster_size = (
-                (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
+                    (self.cluster_size + self.eps) / (n + self.n_embed * self.eps) * n
             )
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
@@ -53,6 +54,7 @@ class Quantizer(nn.Module):
 
     def embed_code(self, embed_id):
         return F.embedding(embed_id, self.embed.transpose(0, 1))
+
 
 class ResBlock(nn.Module):
     def __init__(self, in_channel, channel):
@@ -71,18 +73,19 @@ class ResBlock(nn.Module):
 
         return out
 
+
 class Encoder(nn.Module):
     def __init__(self, in_channel, channel, n_res_block, n_res_channel, stride):
         super().__init__()
 
         if stride == 4:
             blocks = [
-                nn.Conv3d(in_channel, channel, kernel_size=(4, 8, 8), stride=(2,4,4), padding=(1,2,2))
+                nn.Conv3d(in_channel, channel, kernel_size=(4, 8, 8), stride=(2, 4, 4), padding=(1, 2, 2))
             ]
 
         elif stride == 2:
             blocks = [
-                nn.Conv3d(in_channel, channel, kernel_size=(4, 4, 4), stride=(2, 2, 2), padding=(1,1,1))
+                nn.Conv3d(in_channel, channel, kernel_size=(4, 4, 4), stride=(2, 2, 2), padding=(1, 1, 1))
             ]
 
         for i in range(n_res_block):
@@ -95,40 +98,42 @@ class Encoder(nn.Module):
     def forward(self, input):
         return self.blocks(input)
 
+
 class Decoder(nn.Module):
     def __init__(
-        self, in_channel, out_channel, channel, n_res_block, n_res_channel
+            self, in_channel, out_channel, channel, n_res_block, n_res_channel
     ):
         super().__init__()
 
         blocks = [nn.Conv3d(in_channel, channel, 3, padding=1)]
-        
+
         for i in range(n_res_block):
             blocks.append(ResBlock(channel, n_res_channel))
-        
+
         blocks.append(nn.ReLU(inplace=True))
-        
+
         blocks.extend(
             [
-                nn.ConvTranspose3d(channel, out_channel, kernel_size=(4,8,8), stride=(2,4,4), padding=(1,2,2))
+                nn.ConvTranspose3d(channel, out_channel, kernel_size=(4, 8, 8), stride=(2, 4, 4), padding=(1, 2, 2))
             ]
-        ) 
-                
+        )
+
         self.blocks = nn.Sequential(*blocks)
-        
+
     def forward(self, input):
         return self.blocks(input)
 
+
 class VQVAE(pl.LightningModule):
     def __init__(
-        self,
-        in_channel=3,
-        channel=128,
-        n_res_block=2,
-        n_res_channel=32,
-        embed_dim=64,
-        n_embed=512,
-        decay=0.99,
+            self,
+            in_channel=3,
+            channel=128,
+            n_res_block=2,
+            n_res_channel=32,
+            embed_dim=64,
+            n_embed=512,
+            decay=0.99,
     ):
         super().__init__()
 
@@ -152,7 +157,7 @@ class VQVAE(pl.LightningModule):
             n_res_channel
             # stride=4,
         )
-        
+
         self.criterion = nn.MSELoss()
         self.latent_loss_weight = 0.25
 
@@ -161,9 +166,9 @@ class VQVAE(pl.LightningModule):
         dec = self.decode(quant_t, quant_b)
 
         return dec, diff
-    
+
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
@@ -174,7 +179,7 @@ class VQVAE(pl.LightningModule):
         loss = recon_loss + latent_loss * self.latent_loss_weight
         self.log('train_loss', loss)
         return loss
-    
+
     def validation_step(self, val_batch, batch_idx):
         x = y = val_batch
         x_hat, latent_loss = self.forward(x)
@@ -182,7 +187,7 @@ class VQVAE(pl.LightningModule):
         latent_loss = latent_loss.mean()
         loss = recon_loss + latent_loss * self.latent_loss_weight
         self.log('val_loss', loss)
-    
+
     def encode(self, input):
         enc_b = self.enc_b(input)
         enc_t = self.enc_t(enc_b)
@@ -219,6 +224,7 @@ class VQVAE(pl.LightningModule):
 
         return dec
 
+
 if __name__ == "__main__":
     rand_input = torch.rand((8, 3, 16, 256, 256))
     bot_test = Encoder(3, 4, 8, 8, stride=4)
@@ -230,4 +236,5 @@ if __name__ == "__main__":
     print(decoder(bot_out).shape)
     print("VQVAE")
     final = VQVAE()
+    print(final.encode(rand_input)[-1].shape, "hello")
     print(final(rand_input)[0].shape)
