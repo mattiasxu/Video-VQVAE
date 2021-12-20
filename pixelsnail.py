@@ -243,6 +243,8 @@ class HierarchicalPixelSNAIL(pl.LightningModule):
             [nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1)
              for _ in range(n_condition_blocks)])
 
+        self.criterion = nn.NLLLoss()
+
     def forward(self, top_code, bot_code):
         top_code = self.top(top_code)
         condition = F.interpolate(top_code, scale_factor=2)
@@ -252,17 +254,25 @@ class HierarchicalPixelSNAIL(pl.LightningModule):
         return top_code, bot_code
 
     def configure_optimizers(self):
-        # TODO
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
         return optimizer
 
-    def training_step(self):
-        # TODO
-        pass
+    def training_step(self, train_batch, batch_idx):
+        in_top, in_bottom = train_batch
+        out_top, out_bottom = self.forward(in_top, in_bottom)
+        top_loss = self.criterion(out_top, torch.argmax(in_top, dim=1))
+        bottom_loss = self.criterion(out_bottom, torch.argmax(in_bottom, dim=1))
+        loss = top_loss + bottom_loss
+        self.log('train_loss', loss)
+        return loss
 
-    def validation_step(self):
-        # TODO
-        pass
+    def validation_step(self, val_batch, batch_idx):
+        in_top, in_bottom = val_batch
+        out_top, out_bottom = self.forward((in_top, in_bottom))
+        top_loss = self.criterion(out_top, in_top)
+        bottom_loss = self.criterion(out_bottom, in_bottom)
+        loss = top_loss + bottom_loss
+        self.log('val_loss', loss)
 
 
 if __name__ == "__main__":
@@ -275,6 +285,7 @@ if __name__ == "__main__":
 
     top = torch.ones((1, 512, 4, 32, 32)).to(device)
     bot = torch.ones((1, 512, 8, 64, 64)).to(device)
+    print(bot.type())
     final = HierarchicalPixelSNAIL(n_codes=512, n_filters=256, n_res_blocks=2, n_snail_blocks=2, n_condition_blocks=2,
                                    key_channels=16, value_channels=128).to(device)
     final(top, bot)
