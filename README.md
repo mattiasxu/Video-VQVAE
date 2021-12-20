@@ -1,16 +1,15 @@
 # Video-VQVAE
 My PyTorch implementation of https://arxiv.org/abs/2103.01950
 
-Very unfinished 
+Work in progress
 
 
-What is more or less implemented is 3D versions of:
+Implementations of 3D versions of:
 - PixelSNAIL (only for training) https://arxiv.org/pdf/1712.09763.pdf
 - VQ-VAE-2 https://arxiv.org/abs/1906.00446
 
 Missing:
-- Handling data for and training the hierarchical PixelSNAIL
-- Generating new videos/3D stuff, only ready for training
+- Generating new videos/3D stuff with 3D PixelSNAIL. Currently only ready for training
 - Examples
 - prob more stuff
 
