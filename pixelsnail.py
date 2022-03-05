@@ -246,11 +246,11 @@ class HierarchicalPixelSNAIL(pl.LightningModule):
         self.criterion = nn.NLLLoss()
 
     def forward(self, top_code, bot_code):
-        top_code = self.top(top_code)
         condition = F.interpolate(top_code, scale_factor=2)
         for module in self.condition_stack:
             condition = condition + module(condition)
         bot_code = self.bottom(torch.cat((bot_code, condition), dim=1))
+        top_code = self.top(top_code)
         return top_code, bot_code
 
     def configure_optimizers(self):
