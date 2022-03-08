@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from pixelsnail_2d import PixelSNAIL2D
+from einops import rearrange
 import pytorch_lightning as pl
 
 
@@ -226,31 +228,50 @@ class HierarchicalPixelSNAIL(pl.LightningModule):
                               n_snail_blocks=n_snail_blocks, key_channels=key_channels,
                               value_channels=value_channels)
 
-        self.bottom = PixelSNAIL(attention=False, input_channels=n_codes * 2, n_codes=n_codes,
-                                 n_filters=n_filters, n_res_blocks=n_res_blocks,
-                                 n_snail_blocks=n_snail_blocks)
-
-        self.condition_stack = []
-
-        for _ in range(n_condition_blocks):
-            self.condition_stack.extend([
-                nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1),
-                nn.ELU(),
-                nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1)
-            ])
-
-        self.condition_stack = nn.ModuleList(
-            [nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=3, padding=1)
-             for _ in range(n_condition_blocks)])
+        self.condition_top = nn.Sequential(
+            nn.ConvTranspose3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(4, 3, 3), stride=(2,1,1), padding=1),
+            nn.ELU(),
+            nn.ConvTranspose3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(3, 4, 4), stride=(1,2,2), padding=1),
+            nn.ELU(),
+            nn.ConvTranspose3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(3, 3, 3), stride=(1,1,1), padding=1),
+        )
+        self.condition_bottom = nn.Sequential(
+            nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(4, 3, 3), stride=(2,1,1), padding=1),
+            nn.ELU(),
+            nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(4, 3, 3), stride=(2,1,1), padding=1),
+            nn.ELU(),
+            nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(4, 3, 3), stride=(2,1,1), padding=1),
+            nn.ELU(),
+            nn.Conv3d(in_channels=n_codes, out_channels=n_codes, kernel_size=(4, 3, 3), stride=(2,1,1), padding=1),
+        )
+        self.bottom = PixelSNAIL2D(
+            [32, 32],
+            512,
+            128,
+            5,
+            2,
+            2,
+            128,
+            attention=False,
+            dropout=0.1,
+            n_cond_res_block=2,
+            cond_res_channel=1024,
+        )
 
         self.criterion = nn.NLLLoss()
 
     def forward(self, top_code, bot_code):
-        condition = F.interpolate(top_code, scale_factor=2)
-        for module in self.condition_stack:
-            condition = condition + module(condition)
-        bot_code = self.bottom(torch.cat((bot_code, condition), dim=1))
+        condition_top = self.condition_top(top_code)
+        condition_bottom = self.condition_bottom(bot_code)
+        condition = torch.cat((condition_top, condition_bottom.repeat(1, 1, 18, 1, 1)), dim=1)
+        b, s = condtion.shape[0], condition.shape[1]
+        condition = rearrange(condition, 'b c s h w -> (b s) c h w')
+        bot_code = rearrange(bot_code, 'b c s h w -> (b s) c h w')
+        bot_code = self.bottom(bot_code, condition)
+        bot_code = rearrange(bot_code, '(b s) c h w -> b c s h w', b=b, s=s)
+        
         top_code = self.top(top_code)
+        
         return top_code, bot_code
 
     def configure_optimizers(self):
